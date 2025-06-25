@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Satellite Health Monitoring</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .navbar {
+      width:140px; position: auto; background-color: #570707;
+      position: fixed; top: 10px; left: 10px; 
+      height: 30; overflow-y:auto;
+    }
+
+    .navbar a {
+      display:block; padding:16px 10px;
+      text-decoration:underline; color:#fff;
+    }
+
+    .navbar a:hover {
+      background-color: #160d47;
+    }
+
+    body {
+      background: linear-gradient(to bottom right, #0f2027, #203a43, #2c5364);
+      font-family: 'Segoe UI', sans-serif;
+      color: #ffffff;
+      padding: 1rem;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+
+    .upload-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .data-section {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1rem;
+      border-radius: 10px;
+      max-width: 100%;
+      margin: 0 auto;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+
+    .data-section h2 {
+      border-bottom: 1px solid #ffffff33;
+      padding-bottom: 0.5rem;
+    }
+
+    .telemetry-card {
+      font-size: 0.9rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .telemetry-card > div {
+      flex: 1 1 300px;
+    }
+
+    canvas {
+      max-width: 300px;
+    }
+
+    pre {
+      background-color: rgba(255,255,255,0.1);
+      padding: 0.5rem;
+      font-size: 0.85rem;
+      overflow-x: auto;
+    }
+
+    .comparison-section {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-around;
+      margin-top: 2rem;
+    }
+
+    .comparison-section canvas {
+      max-width: 280px;
+      margin: 10px;
+    }
+
+    p {
+      text-align: center;
+    }
+
+    .logo-container {
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 🔽 Centered University Logo -->
+  <div class="logo-container">
+    <img src="logo.jpeg" alt="University Logo" style="width: 120px; height: auto;">
+  </div>
+
+  <div class="navbar">
+    <a href="C:\Users\roy20\OneDrive\Desktop\SHM-Kk\SHM-K\index.html"> Home </a>
+    <a href="C:\Users\roy20\OneDrive\Desktop\SHM-Kk\SHM-K\About_Project.html"> About Project </a>
+    <a href="C:\Users\roy20\OneDrive\Desktop\SHM-Kk\SHM-K\description.html"> Project Description </a>
+    <a href="C:\Users\roy20\OneDrive\Desktop\SHM-Kk\SHM-K\contactus.html"> Contact Us </a>
+  </div>
+  
+  <h1>Nanosatellite Health Monitoring</h1>
+  <div class="upload-buttons">
+    <input type="file" id="singleFile" accept=".bin">
+    <input type="file" id="multipleFiles" accept=".bin" multiple>
+  </div>
+  <div class="data-section" id="telemetryDisplay">
+    <h2>Telemetry Data</h2>
+    <div id="output"></div>
+    <div class="comparison-section">
+      <canvas id="batteryChart"></canvas>
+      <canvas id="orientationXChart"></canvas>
+      <canvas id="orientationYChart"></canvas>
+      <canvas id="orientationZChart"></canvas>
+      <canvas id="solarChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const multiData = {
+      timestamps: [],
+      battery: [],
+      orientationX: [],
+      orientationY: [],
+      orientationZ: [],
+      solar: []
+    };
+
+    function parsePacket(buffer) {
+      const view = new DataView(buffer);
+      const timestamp = view.getUint32(0, true);
+      const nameBytes = new Uint8Array(buffer.slice(4, 20));
+      const satelliteName = new TextDecoder().decode(nameBytes).replace(/\0/g, '');
+      const lat = view.getFloat32(20, true);
+      const lon = view.getFloat32(24, true);
+      const battery = view.getUint8(28);
+      const batteryStatus = view.getUint8(29);
+      const radioStatus = view.getUint8(30);
+      const obc = view.getUint8(31);
+      const adcs = view.getUint8(32);
+      const eps = view.getUint8(33);
+      const batteries = view.getUint8(34);
+      const orientation = Array.from({length: 3}, (_, i) => view.getInt16(35 + i*2, true));
+      const solar = Array.from({length: 6}, (_, i) => view.getFloat32(41 + i*4, true));
+      const tle1 = new TextDecoder().decode(new Uint8Array(buffer.slice(65, 134))).trim();
+      const tle2 = new TextDecoder().decode(new Uint8Array(buffer.slice(134, 203))).trim();
+
+      return {
+        timestamp, satelliteName, lat, lon, battery, batteryStatus,
+        radioStatus, obc, adcs, eps, batteries, orientation, solar, tle1, tle2
+      };
+    }
+
+    function displayTelemetry(data, container) {
+      const timeStr = new Date(data.timestamp * 1000).toLocaleTimeString();
+      container.innerHTML += `
+        <div class="telemetry-card">
+          <div>
+            <p>🕒 <strong>Timestamp:</strong> ${timeStr}</p>
+            <p>🛰️ <strong>Satellite:</strong> ${data.satelliteName}</p>
+            <p>📍 <strong>GPS:</strong> (${data.lat.toFixed(3)}, ${data.lon.toFixed(3)})</p>
+            <p>🔋 <strong>Battery:</strong> ${data.battery}% (${data.batteryStatus ? 'Charging 🔌' : 'Discharging'})</p>
+            <p>📡 <strong>Radio:</strong> ${data.radioStatus ? 'Active ✅' : 'Inactive ❌'}</p>
+            <p>🧠 <strong>OBC:</strong> ${data.obc ? 'Stable ✅' : 'Error ❌'}</p>
+            <p>🎯 <strong>ADCS:</strong> ${data.adcs ? 'Stable ✅' : 'Error ❌'}</p>
+            <p>⚡ <strong>EPS:</strong> ${data.eps ? 'Stable ✅' : 'Error ❌'}</p>
+            <p>🔋 <strong>Batteries:</strong> ${data.batteries ? 'Stable ✅' : 'Error ❌'}</p>
+            <p>📈 <strong>Orientation:</strong></p>
+            <p>🧭 X Axis = ${data.orientation[0]}</p>
+            <p>🧭 Y Axis = ${data.orientation[1]}</p>
+            <p>🧭 Z Axis = ${data.orientation[2]}</p>
+          </div>
+          <div>
+            <canvas id="solarChart-${data.timestamp}" height="100"></canvas>
+          </div>
+          <div>
+            <p><strong>📄 NORAD TLE:</strong></p>
+            <pre>${data.tle1}\n${data.tle2}</pre>
+          </div>
+        </div>
+      `;
+      const ctx = document.getElementById(`solarChart-${data.timestamp}`).getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['X', 'X+', 'Y', 'Y+', 'Z', 'Z+'],
+          datasets: [{
+            label: 'Solar Power (W)',
+            data: data.solar,
+            backgroundColor: 'rgba(255, 206, 86, 0.6)'
+          }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+      });
+
+      multiData.timestamps.push(timeStr);
+      multiData.battery.push(data.battery);
+      multiData.orientationX.push(data.orientation[0]);
+      multiData.orientationY.push(data.orientation[1]);
+      multiData.orientationZ.push(data.orientation[2]);
+      multiData.solar.push(data.solar.reduce((a, b) => a + b, 0));
+    }
+
+    function drawComparisonCharts() {
+      const configs = [
+        { id: "batteryChart", label: "Battery (%)", data: multiData.battery, color: "lime" },
+        { id: "orientationXChart", label: "Orientation X", data: multiData.orientationX, color: "red" },
+        { id: "orientationYChart", label: "Orientation Y", data: multiData.orientationY, color: "orange" },
+        { id: "orientationZChart", label: "Orientation Z", data: multiData.orientationZ, color: "yellow" },
+        { id: "solarChart", label: "Total Solar Power (W)", data: multiData.solar, color: "cyan" }
+      ];
+
+      configs.forEach(({ id, label, data, color }) => {
+        new Chart(document.getElementById(id).getContext("2d"), {
+          type: 'line',
+          data: {
+            labels: multiData.timestamps,
+            datasets: [{ label, data, borderColor: color, tension: 0.4, fill: false }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { labels: { color: 'white' } } },
+            scales: {
+              x: { ticks: { color: 'white' } },
+              y: { ticks: { color: 'white' }, beginAtZero: true }
+            }
+          }
+        });
+      });
+    }
+
+    document.getElementById('singleFile').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        file.arrayBuffer().then(buf => {
+          const data = parsePacket(buf);
+          document.getElementById('output').innerHTML = '';
+          displayTelemetry(data, document.getElementById('output'));
+        });
+      }
+    });
+
+    document.getElementById('multipleFiles').addEventListener('change', (e) => {
+      const files = e.target.files;
+      const output = document.getElementById('output');
+      output.innerHTML = '';
+      Object.keys(multiData).forEach(k => multiData[k] = []);
+      Array.from(files).forEach((file, index, array) => {
+        file.arrayBuffer().then(buf => {
+          const data = parsePacket(buf);
+          multiData.timestamps.push(new Date(data.timestamp * 1000).toLocaleTimeString());
+          multiData.battery.push(data.battery);
+          multiData.orientationX.push(data.orientation[0]);
+          multiData.orientationY.push(data.orientation[1]);
+          multiData.orientationZ.push(data.orientation[2]);
+          multiData.solar.push(data.solar.reduce((a, b) => a + b, 0));
+          if (index === array.length - 1) drawComparisonCharts();
+        });
+      });
+    });
+  </script>
+  <p><b>Designed by Khushi Roy (BCA-6), Guided by N.L.Murthy (Asst. Professor)</b></p>
+</body>
+</html>
